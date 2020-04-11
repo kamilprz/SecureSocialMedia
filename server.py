@@ -48,6 +48,11 @@ def main():
                     create_group(action[1])
                 elif action[0] == 'post':
                     post_to_group(action[1])
+                elif action[0] == 'view':
+                    view_group(action[1])
+                elif action[0] == 'decrypt':
+                    decrypt_group(action[1])
+                
 
 
     except (KeyboardInterrupt, SystemExit):
@@ -118,8 +123,8 @@ def post_to_group(group_name):
     group_key = group['group_key']
     f = Fernet(group_key)
     token = f.encrypt(message.encode())
-    # print(token)
-    # print(f.decrypt(token))
+    print(token)
+    print(f.decrypt(token))
 
     messages = group['messages']
     messages.append(token)
@@ -127,6 +132,23 @@ def post_to_group(group_name):
         'messages': messages
     }
     groups.update_one({'group_name': group_name}, {'$set': group_updates}) 
+
+
+def view_group(group_name):
+    group = groups.find_one({'group_name': group_name})
+    messages = group['messages']
+    print('\nWelcome to {0}'.format(group_name))
+    for x in messages:
+        print('\n' + x.decode()) 
+
+
+def decrypt_group(group_name):
+    group = groups.find_one({'group_name': group_name})
+    group_key = group['group_key']
+    f = Fernet(group_key)
+    messages = group['messages']
+    for x in messages:
+        print((f.decrypt(x)).decode()) 
 
 if __name__ == '__main__':
     main()
