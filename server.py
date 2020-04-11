@@ -1,3 +1,4 @@
+import datetime
 import Crypto
 from Crypto.PublicKey import RSA
 from cryptography.fernet import Fernet
@@ -24,7 +25,7 @@ def main():
         loginUser = ''
         # print some sort of 'help' with commands available
         while True:
-            action = input('\nWhat would you like to do >>>  ')
+            action = input('\nWhat would you like to do >>> ')
             action = action.split(' ')
             # not logged in
             if loginUser == '':
@@ -33,10 +34,6 @@ def main():
 
                 elif action[0] == 'login':
                     login()
-
-                elif action[0] == 'logout' or action[0] == 'stop':
-                    logout()
-                    break
                 
                 else:
                     print('Invalid input. Type \'help\' for more info.')
@@ -46,12 +43,19 @@ def main():
                 if action[0] == 'create':
                     # action[1] is group name
                     create_group(action[1])
+                
                 elif action[0] == 'post':
                     post_to_group(action[1])
+                
                 elif action[0] == 'view':
                     view_group(action[1])
+                
                 elif action[0] == 'decrypt':
                     decrypt_group(action[1])
+
+                elif action[0] == 'logout' or action[0] == 'stop':
+                    logout()
+
                 
 
 
@@ -89,7 +93,7 @@ def login():
         password = getpass()
         if password == user['password']:
             loginUser = username
-            print('Logged in as {0}'.format(loginUser))
+            print('Logged in as: {0}'.format(loginUser))
         else:
             print('Wrong password')
     else:
@@ -104,7 +108,6 @@ def logout():
 
 def create_group(group_name):
     global loginUser
-    print('grp name = {0}'.format(group_name))
     group_key = Fernet.generate_key()
     new_group = {
         'owner': loginUser,
@@ -114,6 +117,7 @@ def create_group(group_name):
         'messages': []
     }
     groups.insert_one(new_group)
+    print('Created group: {0}'.format(group_name))
 
 
 def post_to_group(group_name):
@@ -123,11 +127,11 @@ def post_to_group(group_name):
     group_key = group['group_key']
     f = Fernet(group_key)
     token = f.encrypt(message.encode())
-    print(token)
-    print(f.decrypt(token))
-
+    # print(token)
+    # print(f.decrypt(token))
+    dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     messages = group['messages']
-    messages.append(token)
+    messages.append((loginUser, dt ,token))
     group_updates = {
         'messages': messages
     }
@@ -137,9 +141,10 @@ def post_to_group(group_name):
 def view_group(group_name):
     group = groups.find_one({'group_name': group_name})
     messages = group['messages']
-    print('\nWelcome to {0}'.format(group_name))
+    print('\n>>>> Welcome to {0} <<<<'.format(group_name))
     for x in messages:
-        print('\n' + x.decode()) 
+        print('>>> {0} @ {1}'.format(x[0], x[1]))
+        print(x[2].decode() + '\n') 
 
 
 def decrypt_group(group_name):
@@ -147,9 +152,10 @@ def decrypt_group(group_name):
     group_key = group['group_key']
     f = Fernet(group_key)
     messages = group['messages']
+    print('\n>>>> Welcome to {0} <<<<'.format(group_name))
     for x in messages:
-        print((f.decrypt(x)).decode()) 
+        print('>>> {0} @ {1}'.format(x[0], x[1]))
+        print((f.decrypt(x[2])).decode() + '\n') 
 
 if __name__ == '__main__':
     main()
-
