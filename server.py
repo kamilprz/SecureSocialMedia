@@ -87,8 +87,8 @@ def register():
         'password' : password,
         'private_key': private_key.exportKey(),
         'public_key': public_key.exportKey(),
-        'group_keys': [],
-        'invites': []
+        'group_keys': {},
+        'invites': {}
     }
     users.insert_one(new_user)
     print('Registered user: ' + username)
@@ -137,7 +137,7 @@ def create_group(group_name, owner):
     groups.insert_one(new_group)
     print('Created group: {0}'.format(group_name))
     group_keys = owner['group_keys']
-    group_keys.append((group_name, group_key))
+    group_keys.update({group_name: group_key})
     owner_updates = {
         'group_keys': group_keys
     }
@@ -182,8 +182,13 @@ def decrypt_group(group_name):
 
 
 def invite(username, group_name, source):
+    group_key = source['group_keys']
     target = users.find_one({'username': username})
-    public_key = target['public_key']
+    if target:
+        public_key = target['public_key']
+
+    else:
+        print('User {0} does not exist.'.format(username))
 
 if __name__ == '__main__':
     main()
