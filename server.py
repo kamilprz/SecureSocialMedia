@@ -57,6 +57,12 @@ def main():
                     # invite <user> <group>
                     invite(action[1], action[2], loginUser)
 
+                elif action[0] == 'inbox':
+                    view_inbox(loginUser)
+
+                elif action[0] == 'join':
+                    join_group(action[1], loginUser)
+
                 elif action[0] == 'logout' or action[0] == 'stop':
                     loginUser = logout(loginUser)
 
@@ -66,15 +72,20 @@ def main():
 
 def print_help():
     print("""
-    login
-    register
-    logout
-    create <group>
-    view <group>
-    decrypt <group>
-    post <group>
-    invite <user> <group>
-    remove <user> <group> (owner only) """)
+    When not logged in:
+        login
+        register
+
+    When logged in:
+        create <group>
+        view <group>
+        decrypt <group>
+        post <group>
+        inbox
+        invite <user> <group>
+        remove <user> <group> (owner only)
+        logout
+    """)
 
 
 def register():
@@ -93,6 +104,7 @@ def register():
     }
     users.insert_one(new_user)
     print('Registered user: ' + username)
+
 
 # RSA user keys
 def generate_keys():
@@ -120,6 +132,7 @@ def logout(loginUser):
     loginUser = None
     print('Logged out.')
     return loginUser
+
 
 def create_group(group_name, owner):
     # owner is the loginUser who called create_group()
@@ -191,30 +204,33 @@ def invite(username, group_name, source):
         else:
             public_key = (target['public_key'])
             public_key = RSA.importKey(public_key)
-
-            # encryption crashes
-            invite_key = encrypt_message(group_key, public_key)
+            #Instantiating PKCS1_OAEP object with the public key for encryption
+            cipher = PKCS1_OAEP.new(key = public_key)
+            #Encrypting the message with the PKCS1_OAEP object
+            invite_key = cipher.encrypt(group_key)
             invites = target['invites']
             invites.update({group_name: invite_key})
             target_updates = {
                 'invites': invites
             }
             users.update_one({'username': target['username']}, {'$set': target_updates}) 
-            print('Invite to {0} has been sent to {1}'.format(group_name, target['username']))
+            print('Invite to \'{0}\' has been sent to \'{1}\''.format(group_name, target['username']))
     else:
-        print('User {0} does not exist.'.format(username))
+        print('User \'{0}\' does not exist.'.format(username))
 
 
-def encrypt_message(message , publickey):
-   encrypted_msg = publickey.encrypt(message, 32)[0]
-   encoded_encrypted_msg = base64.b64encode(encrypted_msg)
-   return encoded_encrypted_msg
+def view_inbox(user):
+    if user['invites']:
+        print('You are invited to {0} group(s).'.format(len(user['invites'])))
+        for x in user['invites']:
+            print('>> {0}'.format(x))
+    else:
+        print('Your inbox is empty.')
 
 
-def decrypt_message(encoded_encrypted_msg, privatekey):
-   decoded_encrypted_msg = base64.b64decode(encoded_encrypted_msg)
-   decoded_decrypted_msg = privatekey.decrypt(decoded_encrypted_msg)
-   return decoded_decrypted_msg
+# def join_group(group_name, user):
+
+
 
 if __name__ == '__main__':
     main()
