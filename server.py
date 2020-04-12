@@ -1,6 +1,7 @@
 import datetime
 import Crypto
 from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_OAEP
 from cryptography.fernet import Fernet
 import base64
 from pymongo import MongoClient
@@ -182,13 +183,38 @@ def decrypt_group(group_name):
 
 
 def invite(username, group_name, source):
-    group_key = source['group_keys']
+    group_key = source['group_keys'][group_name]
     target = users.find_one({'username': username})
     if target:
-        public_key = target['public_key']
+        if target['username'] == source['username']:
+            print('You cannot invite yourself to a group.')
+        else:
+            public_key = (target['public_key'])
+            public_key = RSA.importKey(public_key)
 
+            # encryption crashes
+            invite_key = encrypt_message(group_key, public_key)
+            invites = target['invites']
+            invites.update({group_name: invite_key})
+            target_updates = {
+                'invites': invites
+            }
+            users.update_one({'username': target['username']}, {'$set': target_updates}) 
+            print('Invite to {0} has been sent to {1}'.format(group_name, target['username']))
     else:
         print('User {0} does not exist.'.format(username))
+
+
+def encrypt_message(message , publickey):
+   encrypted_msg = publickey.encrypt(message, 32)[0]
+   encoded_encrypted_msg = base64.b64encode(encrypted_msg)
+   return encoded_encrypted_msg
+
+
+def decrypt_message(encoded_encrypted_msg, privatekey):
+   decoded_encrypted_msg = base64.b64decode(encoded_encrypted_msg)
+   decoded_decrypted_msg = privatekey.decrypt(decoded_encrypted_msg)
+   return decoded_decrypted_msg
 
 if __name__ == '__main__':
     main()
