@@ -58,10 +58,13 @@ def main():
                     invite(action[1], action[2], loginUser)
 
                 elif action[0] == 'inbox':
-                    view_inbox(loginUser)
+                    loginUser = view_inbox(loginUser)
 
                 elif action[0] == 'join':
                     join_group(action[1], loginUser)
+                
+                elif action[0] == 'clear':
+                    clear_inbox(loginUser)
 
                 elif action[0] == 'logout' or action[0] == 'stop':
                     loginUser = logout(loginUser)
@@ -220,17 +223,25 @@ def invite(username, group_name, source):
 
 
 def view_inbox(user):
-    if user['invites']:
-        print('You are invited to {0} group(s).'.format(len(user['invites'])))
-        for x in user['invites']:
+    updated_user = users.find_one({'username': user['username']})
+    if updated_user['invites']:
+        print('You are invited to {0} group(s).'.format(len(updated_user['invites'])))
+        for x in updated_user['invites']:
             print('>> {0}'.format(x))
     else:
         print('Your inbox is empty.')
-
+    return updated_user
 
 # def join_group(group_name, user):
 
 
+def clear_inbox(user):
+    invites = {}
+    invites_update = {
+        'invites': invites
+    }
+    users.update_one({'username': user['username']}, {'$set': invites_update}) 
+    print('Cleared inbox for \'{0}\''.format(user['username']))
 
 if __name__ == '__main__':
     main()
