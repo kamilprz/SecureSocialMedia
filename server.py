@@ -7,33 +7,32 @@ from pymongo import MongoClient
 from getpass import getpass
 from tmp import temp
 
+
 mongoC = temp.getMongoClient()
 client = MongoClient(mongoC)
 db = client.get_database('telecomms_db')
 users = db.users
 groups = db.groups
 
-# group = {
-#     'session_key': '',
-#     'messages': [(user, encryptedMessage), (user2, encryptedMessage2), ...]
-# }
-
 
 def main():
     try:
-        global loginUser
-        loginUser = ''
+        loginUser = None
         # print some sort of 'help' with commands available
         while True:
             action = input('\nWhat would you like to do >>> ')
             action = action.split(' ')
+            if action[0] == 'help':
+                print_help()
+                continue
+
             # not logged in
-            if loginUser == '':
+            if loginUser is None:
                 if action[0] == 'register':
                     register()
 
                 elif action[0] == 'login':
-                    login()
+                    loginUser = login(loginUser)
                 
                 else:
                     print('Invalid input. Type \'help\' for more info.')
@@ -42,10 +41,10 @@ def main():
             else:
                 if action[0] == 'create':
                     # action[1] is group name
-                    create_group(action[1])
+                    create_group(action[1], loginUser)
                 
                 elif action[0] == 'post':
-                    post_to_group(action[1])
+                    post_to_group(action[1], loginUser)
                 
                 elif action[0] == 'view':
                     view_group(action[1])
@@ -53,14 +52,28 @@ def main():
                 elif action[0] == 'decrypt':
                     decrypt_group(action[1])
 
+                elif action[0] == 'invite':
+                    # invite <user> <group>
+                    invite(action[1], action[2], loginUser)
+
                 elif action[0] == 'logout' or action[0] == 'stop':
-                    logout()
-
-                
-
+                    loginUser = logout(loginUser)
 
     except (KeyboardInterrupt, SystemExit):
         print('\n\nShutting down...')    
+
+
+def print_help():
+    print("""
+    login
+    register
+    logout
+    create <group>
+    view <group>
+    decrypt <group>
+    post <group>
+    invite <user> <group>
+    remove <user> <group> (owner only) """)
 
 
 def register():
@@ -73,9 +86,12 @@ def register():
         'username' : username,
         'password' : password,
         'private_key': private_key.exportKey(),
-        'public_key': public_key.exportKey()
+        'public_key': public_key.exportKey(),
+        'group_keys': [],
+        'invites': []
     }
     users.insert_one(new_user)
+    print('Registered user: ' + username)
 
 # RSA user keys
 def generate_keys():
@@ -84,44 +100,51 @@ def generate_keys():
    return private_key, public_key
 
 
-def login():
-    global loginUser
+def login(loginUser):
     username = input('Username: ')
     user = users.find_one({'username': username})
-    # cache the keys here?
     if user:
         password = getpass()
         if password == user['password']:
-            loginUser = username
-            print('Logged in as: {0}'.format(loginUser))
+            loginUser = user
+            print('Logged in as: {0}'.format(loginUser['username']))
         else:
             print('Wrong password')
     else:
         print('User not found')
+    return loginUser
 
 
-def logout():
-    global loginUser
-    loginUser = ''
+def logout(loginUser):
+    loginUser = None
     print('Logged out.')
+    return loginUser
 
-
-def create_group(group_name):
-    global loginUser
+def create_group(group_name, owner):
+    # owner is the loginUser who called create_group()
+    owner_username = owner['username']
     group_key = Fernet.generate_key()
+    f = Fernet(group_key)
+    dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    message = 'Created {0}. Hello, world!'.format(group_name)
+    token = f.encrypt(message.encode())
     new_group = {
-        'owner': loginUser,
+        'owner': owner_username,
         'group_name': group_name,
-        'group_key': group_key,
-        'users': [loginUser],
-        'messages': []
+        'users': [owner_username],
+        'messages': [(owner_username, dt, token)]
     }
     groups.insert_one(new_group)
     print('Created group: {0}'.format(group_name))
+    group_keys = owner['group_keys']
+    group_keys.append((group_name, group_key))
+    owner_updates = {
+        'group_keys': group_keys
+    }
+    users.update_one({'username': owner_username}, {'$set': owner_updates}) 
 
 
-def post_to_group(group_name):
-    global loginUser
+def post_to_group(group_name, loginUser):
     message = input('Post to {0}: \n'.format(group_name))
     group = groups.find_one({'group_name': group_name})
     group_key = group['group_key']
@@ -131,7 +154,7 @@ def post_to_group(group_name):
     # print(f.decrypt(token))
     dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     messages = group['messages']
-    messages.append((loginUser, dt ,token))
+    messages.append((loginUser['username'], dt ,token))
     group_updates = {
         'messages': messages
     }
@@ -156,6 +179,11 @@ def decrypt_group(group_name):
     for x in messages:
         print('>>> {0} @ {1}'.format(x[0], x[1]))
         print((f.decrypt(x[2])).decode() + '\n') 
+
+
+def invite(username, group_name, source):
+    target = users.find_one({'username': username})
+    public_key = target['public_key']
 
 if __name__ == '__main__':
     main()
