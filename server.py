@@ -210,24 +210,29 @@ def create_group(group_name, owner):
     users.update_one({'username': owner_username}, {'$set': owner_updates}) 
 
 
-# TODO: check if user is in a group
 # a logged in user who is part of the group can post a message to the group
 # a user not part of the group gets an error message
 def post_to_group(group_name, user):
-    message = input('Post to {0}: \n'.format(group_name))
     group = groups.find_one({'group_name': group_name})
-    group_key = decrypt_group_key(user, group_name)
-    
-    # encrypt the message using the group_key
-    f = Fernet(group_key)
-    token = f.encrypt(message.encode())
-    dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    messages = group['messages']
-    messages.append((user['username'], dt ,token))
-    group_updates = {
-        'messages': messages
-    }
-    groups.update_one({'group_name': group_name}, {'$set': group_updates}) 
+    if group:
+        if check_membership(user, group):
+            message = input('Post to {0}: \n'.format(group_name))
+            group_key = decrypt_group_key(user, group_name)
+            
+            # encrypt the message using the group_key
+            f = Fernet(group_key)
+            token = f.encrypt(message.encode())
+            dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            messages = group['messages']
+            messages.append((user['username'], dt ,token))
+            group_updates = {
+                'messages': messages
+            }
+            groups.update_one({'group_name': group_name}, {'$set': group_updates}) 
+        else:
+            print('You must be part of the group to post to it.')
+    else:
+        print('This group does not exist.')
 
 
 # a logged in user can view the group's messages
@@ -256,68 +261,81 @@ def view_group(group_name, user):
 
 # a member of a group can invite another existing user to the group
 def invite(username, group_name, source):
-    # TODO: give error message and not crash if not in group
-    group_key = decrypt_group_key(source, group_name)
-    
-    target = users.find_one({'username': username})
-    if target:
-        if target['username'] == source['username']:
-            print('You cannot invite yourself to a group.')
+    group = groups.find_one({'group_name': group_name})
+    if group:
+        if check_membership(source, group):
+            group_key = decrypt_group_key(source, group_name)
+            
+            target = users.find_one({'username': username})
+            if target:
+                if target['username'] == source['username']:
+                    print('You cannot invite yourself to a group.')
+                else:
+                    invite_key = encrypt_group_key(target, group_key)
+                    invites = target['invites']
+                    invites.update({group_name: invite_key})
+                    target_updates = {
+                        'invites': invites
+                    }
+                    users.update_one({'username': target['username']}, {'$set': target_updates}) 
+                    print('Invite to \'{0}\' has been sent to \'{1}\''.format(group_name, target['username']))
+            else:
+                print('User \'{0}\' does not exist.'.format(username))
         else:
-            invite_key = encrypt_group_key(target, group_key)
-            invites = target['invites']
-            invites.update({group_name: invite_key})
-            target_updates = {
-                'invites': invites
-            }
-            users.update_one({'username': target['username']}, {'$set': target_updates}) 
-            print('Invite to \'{0}\' has been sent to \'{1}\''.format(group_name, target['username']))
+            print('You must be part of the group to invite to it.')
     else:
-        print('User \'{0}\' does not exist.'.format(username))
+        print('This group does not exist.')
 
 
 # the owner of a group is able to kick users out of the group
 def kick(username, group_name, source):
     group = groups.find_one({'group_name': group_name})
-    # check if owner
-    if source['username'] == group['owner']:
-        if source['username'] == username:
-            print('You cannot kick yourself from the group.')
+    if group:
+        # check if owner
+        if source['username'] == group['owner']:
+            if source['username'] == username:
+                print('You cannot kick yourself from the group.')
+            else:
+                # delete target's group_key
+                target = users.find_one({'username': username})
+                if target:
+                    if check_membership(target, group):
+                        user_groups = target['group_keys']
+                        try:
+                            del user_groups[group_name]
+                        except KeyError:
+                            pass
+                        user_update = {
+                            'group_keys': user_groups
+                        }
+                        users.update_one({'username': target['username']}, {'$set': user_update}) 
+                        print('\'{0}\' has been kicked from \'{1}\'.'.format(target['username'], group_name))
+                        
+                        # post a message to the group that user has been kicked
+                        group_key = decrypt_group_key(source, group_name)
+                        f = Fernet(group_key)
+                        dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        message = '\'{0}\' has been kicked from \'{1}\'.'.format(target['username'], group_name)
+                        token = f.encrypt(message.encode())
+                        messages = group['messages']
+                        messages.append((source['username'], dt, token))
+                        
+                        # delete user from group's users
+                        group_users = group['users']
+                        group_users.remove(username)
+                        group_updates = {
+                            'users': group_users,
+                            'messages': messages
+                        }
+                        groups.update_one({'group_name': group_name}, {'$set': group_updates})
+                    else:
+                        print('User \'{0}\' is not part of this group.'.format(username))
+                else:
+                    print('User \'{0}\' does not exist.'.format(username))
         else:
-            # TODO: check if target in group
-            # delete target's group_key
-            target = users.find_one({'username': username})
-            user_groups = target['group_keys']
-            try:
-                del user_groups[group_name]
-            except KeyError:
-                pass
-            user_update = {
-                'group_keys': user_groups
-            }
-            users.update_one({'username': target['username']}, {'$set': user_update}) 
-            print('\'{0}\' has been kicked from \'{1}\'.'.format(target['username'], group_name))
-            
-            # post a message to the group that user has been kicked
-            group_key = decrypt_group_key(source, group_name)
-            f = Fernet(group_key)
-            dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            message = '\'{0}\' has been kicked from \'{1}\'.'.format(target['username'], group_name)
-            token = f.encrypt(message.encode())
-            messages = group['messages']
-            messages.append((source['username'], dt, token))
-            
-            # delete user from group's users
-            group_users = group['users']
-            group_users.remove(username)
-            group_updates = {
-                'users': group_users,
-                'messages': messages
-            }
-            groups.update_one({'group_name': group_name}, {'$set': group_updates})
-
+            print('You cannot do that as you\'re not the owner of {0}.'.format(group_name))
     else:
-        print('You cannot do that as you\'re not the owner of {0}.'.format(group_name))
+        print('This group does not exist.')
 
 
 # a logged in user can check their inbox - shows if they have any invitations to groups
@@ -380,6 +398,13 @@ def join_group(group_name, user):
     groups.update_one({'group_name': group_name}, {'$set': group_updates})
     print('You have successfully joined {0}'.format(group_name)) 
     return user
+
+
+# checks whether a user is part of given group
+def check_membership(user, group):
+    if user['username'] in group['users']:
+        return True
+    return False
 
 
 if __name__ == '__main__':
