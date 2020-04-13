@@ -47,10 +47,7 @@ def main():
                     post_to_group(action[1], loginUser)
                 
                 elif action[0] == 'view':
-                    view_group(action[1])
-                
-                elif action[0] == 'decrypt':
-                    decrypt_group(action[1])
+                    view_group(action[1], loginUser)
 
                 elif action[0] == 'invite':
                     # invite <user> <group>
@@ -152,8 +149,13 @@ def create_group(group_name, owner):
     }
     groups.insert_one(new_group)
     print('Created group: {0}'.format(group_name))
+
+    public_key = owner['public_key']
+    public_key = RSA.importKey(public_key)
+    cipher = PKCS1_OAEP.new(key = public_key)
+    encrypted_key = cipher.encrypt(group_key)
     group_keys = owner['group_keys']
-    group_keys.update({group_name: group_key})
+    group_keys.update({group_name: encrypted_key})
     owner_updates = {
         'group_keys': group_keys
     }
@@ -177,29 +179,40 @@ def post_to_group(group_name, loginUser):
     groups.update_one({'group_name': group_name}, {'$set': group_updates}) 
 
 
-def view_group(group_name):
+def view_group(group_name, user):
     group = groups.find_one({'group_name': group_name})
     messages = group['messages']
-    print('\n>>>> Welcome to {0} <<<<'.format(group_name))
-    for x in messages:
-        print('>>> {0} @ {1}'.format(x[0], x[1]))
-        print(x[2].decode() + '\n') 
+    
+    # a user not part of the group sees the encrypted messages
+    if user['username'] not in group['users']:
+        print('\n>>>> Welcome to {0} <<<<'.format(group_name))
+        for x in messages:
+            print('>>> {0} @ {1}'.format(x[0], x[1]))
+            print(x[2].decode() + '\n') 
 
-
-def decrypt_group(group_name):
-    group = groups.find_one({'group_name': group_name})
-    group_key = group['group_key']
-    f = Fernet(group_key)
-    messages = group['messages']
-    print('\n>>>> Welcome to {0} <<<<'.format(group_name))
-    for x in messages:
-        print('>>> {0} @ {1}'.format(x[0], x[1]))
-        print((f.decrypt(x[2])).decode() + '\n') 
+    # a user inside the group is able to decrypt the messages
+    else:
+        private_key = user['private_key']
+        private_key = RSA.importKey(private_key)
+        decrypt = PKCS1_OAEP.new(key = private_key)
+        encrypted_key = user['group_keys'][group_name]
+        group_key = decrypt.decrypt(encrypted_key)
+        f = Fernet(group_key)
+        messages = group['messages']
+        print('\n>>>> Welcome to {0} <<<<'.format(group_name))
+        for x in messages:
+            print('>>> {0} @ {1}'.format(x[0], x[1]))
+            print((f.decrypt(x[2])).decode() + '\n') 
 
 
 def invite(username, group_name, source):
     # decrypt owners key
-    group_key = source['group_keys'][group_name]
+    private_key = user['private_key']
+    private_key = RSA.importKey(private_key)
+    decrypt = PKCS1_OAEP.new(key = private_key)
+    encrypted_key = source['group_keys'][group_name]
+    group_key = decrypt.decrypt(encrypted_key)
+    
     target = users.find_one({'username': username})
     if target:
         if target['username'] == source['username']:
@@ -253,7 +266,9 @@ def join_group(group_name, user):
     group = groups.find_one({'group_name': group_name})
     # decrypt invite_key into group_key to encrypt message
     #Instantiating PKCS1_OAEP object with the private key for decryption
-    decrypt = PKCS1_OAEP.new(key = user['private_key'])
+    private_key = user['private_key']
+    private_key = RSA.importKey(private_key)
+    decrypt = PKCS1_OAEP.new(key = private_key)
     #Decrypting the message with the PKCS1_OAEP object
     group_key = decrypt.decrypt(invite_key)
     f = Fernet(group_key)
