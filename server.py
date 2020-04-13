@@ -19,7 +19,6 @@ groups = db.groups
 def main():
     try:
         loginUser = None
-        # print some sort of 'help' with commands available
         while True:
             action = input('\nWhat would you like to do >>> ')
             action = action.split(' ')
@@ -61,7 +60,7 @@ def main():
                     loginUser = view_inbox(loginUser)
 
                 elif action[0] == 'join':
-                    join_group(action[1], loginUser)
+                    loginUser = join_group(action[1], loginUser)
                 
                 elif action[0] == 'clear':
                     clear_inbox(loginUser)
@@ -199,6 +198,7 @@ def decrypt_group(group_name):
 
 
 def invite(username, group_name, source):
+    # decrypt owners key
     group_key = source['group_keys'][group_name]
     target = users.find_one({'username': username})
     if target:
@@ -232,7 +232,47 @@ def view_inbox(user):
         print('Your inbox is empty.')
     return updated_user
 
-# def join_group(group_name, user):
+
+def join_group(group_name, user):
+    user = users.find_one({'username': user['username']})
+    # add group and encrypted key to group_keys and delete invite
+    invite_key = user['invites'][group_name]
+    invites = user['invites']
+    try:
+        del invites[group_name]
+    except KeyError:
+        pass
+    user_groups = user['group_keys']
+    user_groups.update({group_name: invite_key})
+    user_update = {
+        'group_keys': user_groups,
+        'invites': invites
+    }
+    users.update_one({'username': user['username']}, {'$set': user_update}) 
+
+    group = groups.find_one({'group_name': group_name})
+    # decrypt invite_key into group_key to encrypt message
+    #Instantiating PKCS1_OAEP object with the private key for decryption
+    decrypt = PKCS1_OAEP.new(key = user['private_key'])
+    #Decrypting the message with the PKCS1_OAEP object
+    group_key = decrypt.decrypt(invite_key)
+    f = Fernet(group_key)
+    dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    message = '{0} has joined the group. Welcome!'.format(user['username'])
+    token = f.encrypt(message.encode())
+    messages = group['messages']
+    messages.append((user['username'], dt, token))
+
+    # add username to groups usernames, and post a join message
+    group_users = group['users']
+    group_users.append(user['username'])
+    group_updates = {
+        'users': group_users,
+        'messages': messages
+    }
+    groups.update_one({'group_name': group_name}, {'$set': group_updates})
+    print('You have successfully joined {0}'.format(group_name)) 
+    return user
 
 
 def clear_inbox(user):
