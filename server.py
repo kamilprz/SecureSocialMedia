@@ -362,43 +362,49 @@ def clear_inbox(user):
 
 # if have any invitations to groups, can join the group
 def join_group(group_name, user):
-    user = users.find_one({'username': user['username']})
-    # add group_name and encrypted_key to group_keys and delete invite from inbox
-    invite_key = user['invites'][group_name]
-    invites = user['invites']
-    try:
-        del invites[group_name]
-    except KeyError:
-        pass
-    user_groups = user['group_keys']
-    user_groups.update({group_name: invite_key})
-    user_update = {
-        'group_keys': user_groups,
-        'invites': invites
-    }
-    users.update_one({'username': user['username']}, {'$set': user_update}) 
-
-    # decrypt invite_key into group_key to encrypt join message
     group = groups.find_one({'group_name': group_name})
-    group_key = decrypt_group_key(user, group_name)
-    f = Fernet(group_key)
-    dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    message = '\'{0}\' has joined the group. Welcome!'.format(user['username'])
-    token = f.encrypt(message.encode())
-    messages = group['messages']
-    messages.append((user['username'], dt, token))
+    if group:
+        user = users.find_one({'username': user['username']})
+        try:
+            # add group_name and encrypted_key to group_keys and delete invite from inbox
+            invite_key = user['invites'][group_name]
+            invites = user['invites']
+            try:
+                del invites[group_name]
+            except KeyError:
+                print('Unable to delete the invite.')
+            user_groups = user['group_keys']
+            user_groups.update({group_name: invite_key})
+            user_update = {
+                'group_keys': user_groups,
+                'invites': invites
+            }
+            users.update_one({'username': user['username']}, {'$set': user_update}) 
 
-    # add username to groups usernames, and post a join message
-    group_users = group['users']
-    group_users.append(user['username'])
-    group_updates = {
-        'users': group_users,
-        'messages': messages
-    }
-    groups.update_one({'group_name': group_name}, {'$set': group_updates})
-    print('You have successfully joined {0}'.format(group_name)) 
-    return user
+            # decrypt invite_key into group_key to encrypt join message
 
+            group_key = decrypt_group_key(user, group_name)
+            f = Fernet(group_key)
+            dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            message = '\'{0}\' has joined the group. Welcome!'.format(user['username'])
+            token = f.encrypt(message.encode())
+            messages = group['messages']
+            messages.append((user['username'], dt, token))
+
+            # add username to groups usernames, and post a join message
+            group_users = group['users']
+            group_users.append(user['username'])
+            group_updates = {
+                'users': group_users,
+                'messages': messages
+            }
+            groups.update_one({'group_name': group_name}, {'$set': group_updates})
+            print('You have successfully joined {0}'.format(group_name)) 
+            return user
+        except KeyError:
+            print('You do not hold an invitation to this group.')
+    else:
+        print('This group does not exist.')
 
 # checks whether a user is part of given group
 def check_membership(user, group):
