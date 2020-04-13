@@ -15,9 +15,12 @@ db = client.get_database('telecomms_db')
 users = db.users
 groups = db.groups
 
-
+# navigation in the program - since there is no GUI
 def main():
     try:
+        # loginUser represents the currently logged in user
+        # if loginUser = None, no user currently logged in
+        # otherwise it has the value of the currently logged in user object
         loginUser = None
         while True:
             action = input('\nWhat would you like to do >>> ')
@@ -40,13 +43,15 @@ def main():
             # logged in
             else:
                 if action[0] == 'create':
-                    # action[1] is group name
+                    # create <group>
                     create_group(action[1], loginUser)
                 
                 elif action[0] == 'post':
+                    # post <group>
                     post_to_group(action[1], loginUser)
                 
                 elif action[0] == 'view':
+                    # post <group>
                     view_group(action[1], loginUser)
 
                 elif action[0] == 'invite':
@@ -58,21 +63,29 @@ def main():
                     kick(action[1], action[2], loginUser)
 
                 elif action[0] == 'join':
+                    # join <group>
                     loginUser = join_group(action[1], loginUser)
 
                 elif action[0] == 'inbox':
+                    # inbox
                     loginUser = view_inbox(loginUser)
                 
                 elif action[0] == 'clear':
+                    # clear
                     clear_inbox(loginUser)
 
                 elif action[0] == 'logout' or action[0] == 'stop':
+                    # logout
                     loginUser = logout(loginUser)
+
+                else:
+                    print('Invalid input. Type \'help\' for more info.')
 
     except (KeyboardInterrupt, SystemExit):
         print('\n\nShutting down...')    
 
 
+# prints all the available commands that a user can enter
 def print_help():
     print("""
     When not logged in:
@@ -93,10 +106,10 @@ def print_help():
     """)
 
 
+# registers a new user into the database
 def register():
     print('Please enter a username and password.')
     username = input('Username: ')
-    # password = input('Password: ')
     password = getpass()
     private_key, public_key = generate_keys()
     new_user = {
@@ -108,16 +121,39 @@ def register():
         'invites': {}
     }
     users.insert_one(new_user)
-    print('Registered user: ' + username)
+    print('Registered user: {0}.'.format(username))
 
 
-# RSA user keys
+# generates user's private and public keys
+# returns these keys
 def generate_keys():
    private_key = RSA.generate(2048)
    public_key = private_key.publickey()
    return private_key, public_key
 
 
+# encrypts a group key using the users public_key
+# returns encrypted_key
+def encrypt_group_key(user, group_key):
+    public_key = user['public_key']
+    public_key = RSA.importKey(public_key)
+    cipher = PKCS1_OAEP.new(key = public_key)
+    encrypted_key = cipher.encrypt(group_key)
+    return encrypted_key
+
+
+# decrypts the encrypted_key of group_name using user's private_key
+# returns group_key
+def decrypt_group_key(user, group_name):
+    encrypted_key = user['group_keys'][group_name]
+    private_key = user['private_key']
+    private_key = RSA.importKey(private_key)
+    decrypt = PKCS1_OAEP.new(key = private_key)
+    group_key = decrypt.decrypt(encrypted_key)
+    return group_key
+
+# log the user in
+# returns a new loginUser object
 def login(loginUser):
     username = input('Username: ')
     user = users.find_one({'username': username})
@@ -127,23 +163,30 @@ def login(loginUser):
             loginUser = user
             print('Logged in as: {0}'.format(loginUser['username']))
         else:
-            print('Wrong password')
+            print('Wrong password.')
     else:
-        print('User not found')
+        print('User not found.')
     return loginUser
 
 
-def logout(loginUser):
-    loginUser = None
+# logs the user out
+# returns loginUser as None to simulate logout
+def logout(user):
+    user = None
     print('Logged out.')
-    return loginUser
+    return user
 
 
+# a logged in user can create a group
 def create_group(group_name, owner):
     # owner is the loginUser who called create_group()
     owner_username = owner['username']
+    
+    # generate a symmetric key for the group
     group_key = Fernet.generate_key()
     f = Fernet(group_key)
+    
+    # group creation message is posted into the group, with current datetime and the owner as author
     dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     message = 'Created {0}. Hello, world!'.format(group_name)
     token = f.encrypt(message.encode())
@@ -156,10 +199,8 @@ def create_group(group_name, owner):
     groups.insert_one(new_group)
     print('Created group: {0}'.format(group_name))
 
-    public_key = owner['public_key']
-    public_key = RSA.importKey(public_key)
-    cipher = PKCS1_OAEP.new(key = public_key)
-    encrypted_key = cipher.encrypt(group_key)
+    # encrypt group_key with owners public_key and add it to their group_keys
+    encrypted_key = encrypt_group_key(owner, group_key)
     group_keys = owner['group_keys']
     group_keys.update({group_name: encrypted_key})
     owner_updates = {
@@ -168,27 +209,28 @@ def create_group(group_name, owner):
     users.update_one({'username': owner_username}, {'$set': owner_updates}) 
 
 
-def post_to_group(group_name, loginUser):
+# TODO: check if user is in a group
+# a logged in user who is part of the group can post a message to the group
+# a user not part of the group gets an error message
+def post_to_group(group_name, user):
     message = input('Post to {0}: \n'.format(group_name))
     group = groups.find_one({'group_name': group_name})
+    group_key = decrypt_key(user, group_name)
     
-    private_key = loginUser['private_key']
-    private_key = RSA.importKey(private_key)
-    decrypt = PKCS1_OAEP.new(key = private_key)
-    encrypted_key = loginUser['group_keys'][group_name]
-    group_key = decrypt.decrypt(encrypted_key)
-
+    # encrypt the message using the group_key
     f = Fernet(group_key)
     token = f.encrypt(message.encode())
     dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     messages = group['messages']
-    messages.append((loginUser['username'], dt ,token))
+    messages.append((user['username'], dt ,token))
     group_updates = {
         'messages': messages
     }
     groups.update_one({'group_name': group_name}, {'$set': group_updates}) 
 
 
+# a logged in user can view the group's messages
+# author and datetime are left unencrypted to help with visibility
 def view_group(group_name, user):
     group = groups.find_one({'group_name': group_name})
     messages = group['messages']
@@ -202,11 +244,7 @@ def view_group(group_name, user):
 
     # a user inside the group is able to decrypt the messages
     else:
-        private_key = user['private_key']
-        private_key = RSA.importKey(private_key)
-        decrypt = PKCS1_OAEP.new(key = private_key)
-        encrypted_key = user['group_keys'][group_name]
-        group_key = decrypt.decrypt(encrypted_key)
+        group_key = decrypt_group_key(user, group_name)
         f = Fernet(group_key)
         messages = group['messages']
         print('\n>>>> Welcome to {0} <<<<'.format(group_name))
@@ -215,27 +253,17 @@ def view_group(group_name, user):
             print((f.decrypt(x[2])).decode() + '\n') 
 
 
+# a member of a group can invite another existing user to the group
 def invite(username, group_name, source):
-    # decrypt owners key
-    private_key = source['private_key']
-    private_key = RSA.importKey(private_key)
-    decrypt = PKCS1_OAEP.new(key = private_key)
-    
-    # give error message and not crash if not in group
-    encrypted_key = source['group_keys'][group_name]
-    group_key = decrypt.decrypt(encrypted_key)
+    # TODO: give error message and not crash if not in group
+    group_key = decrypt_group_key(source, group_name)
     
     target = users.find_one({'username': username})
     if target:
         if target['username'] == source['username']:
             print('You cannot invite yourself to a group.')
         else:
-            public_key = (target['public_key'])
-            public_key = RSA.importKey(public_key)
-            #Instantiating PKCS1_OAEP object with the public key for encryption
-            cipher = PKCS1_OAEP.new(key = public_key)
-            #Encrypting the message with the PKCS1_OAEP object
-            invite_key = cipher.encrypt(group_key)
+            invite_key = encrypt_group_key(target, group_key)
             invites = target['invites']
             invites.update({group_name: invite_key})
             target_updates = {
@@ -247,6 +275,7 @@ def invite(username, group_name, source):
         print('User \'{0}\' does not exist.'.format(username))
 
 
+# the owner of a group is able to kick users out of the group
 def kick(username, group_name, source):
     group = groups.find_one({'group_name': group_name})
     if source['username'] == group['owner']:
