@@ -361,6 +361,7 @@ def clear_inbox(user):
 
 
 # if have any invitations to groups, can join the group
+# returns an updated object of the user
 def join_group(group_name, user):
     group = groups.find_one({'group_name': group_name})
     if group:
@@ -382,7 +383,6 @@ def join_group(group_name, user):
             users.update_one({'username': user['username']}, {'$set': user_update}) 
 
             # decrypt invite_key into group_key to encrypt join message
-
             group_key = decrypt_group_key(user, group_name)
             f = Fernet(group_key)
             dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -400,11 +400,13 @@ def join_group(group_name, user):
             }
             groups.update_one({'group_name': group_name}, {'$set': group_updates})
             print('You have successfully joined {0}'.format(group_name)) 
-            return user
         except KeyError:
             print('You do not hold an invitation to this group.')
+            return user
     else:
         print('This group does not exist.')
+    return user
+
 
 # checks whether a user is part of given group
 def check_membership(user, group):
