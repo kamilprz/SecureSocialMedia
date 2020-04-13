@@ -121,7 +121,7 @@ def register():
         'invites': {}
     }
     users.insert_one(new_user)
-    print('Registered user: {0}.'.format(username))
+    print('Registered user: {0}'.format(username))
 
 
 # generates user's private and public keys
@@ -151,6 +151,7 @@ def decrypt_group_key(user, group_name):
     decrypt = PKCS1_OAEP.new(key = private_key)
     group_key = decrypt.decrypt(encrypted_key)
     return group_key
+
 
 # log the user in
 # returns a new loginUser object
@@ -215,7 +216,7 @@ def create_group(group_name, owner):
 def post_to_group(group_name, user):
     message = input('Post to {0}: \n'.format(group_name))
     group = groups.find_one({'group_name': group_name})
-    group_key = decrypt_key(user, group_name)
+    group_key = decrypt_group_key(user, group_name)
     
     # encrypt the message using the group_key
     f = Fernet(group_key)
@@ -278,10 +279,12 @@ def invite(username, group_name, source):
 # the owner of a group is able to kick users out of the group
 def kick(username, group_name, source):
     group = groups.find_one({'group_name': group_name})
+    # check if owner
     if source['username'] == group['owner']:
         if source['username'] == username:
             print('You cannot kick yourself from the group.')
         else:
+            # TODO: check if target in group
             # delete target's group_key
             target = users.find_one({'username': username})
             user_groups = target['group_keys']
@@ -294,18 +297,16 @@ def kick(username, group_name, source):
             }
             users.update_one({'username': target['username']}, {'$set': user_update}) 
             print('\'{0}\' has been kicked from \'{1}\'.'.format(target['username'], group_name))
+            
             # post a message to the group that user has been kicked
-            private_key = source['private_key']
-            private_key = RSA.importKey(private_key)
-            decrypt = PKCS1_OAEP.new(key = private_key)
-            encrypted_key = source['group_keys'][group_name]
-            group_key = decrypt.decrypt(encrypted_key)
+            group_key = decrypt_group_key(source, group_name)
             f = Fernet(group_key)
             dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             message = '\'{0}\' has been kicked from \'{1}\'.'.format(target['username'], group_name)
             token = f.encrypt(message.encode())
             messages = group['messages']
             messages.append((source['username'], dt, token))
+            
             # delete user from group's users
             group_users = group['users']
             group_users.remove(username)
@@ -319,6 +320,7 @@ def kick(username, group_name, source):
         print('You cannot do that as you\'re not the owner of {0}.'.format(group_name))
 
 
+# a logged in user can check their inbox - shows if they have any invitations to groups
 def view_inbox(user):
     updated_user = users.find_one({'username': user['username']})
     if updated_user['invites']:
@@ -330,9 +332,20 @@ def view_inbox(user):
     return updated_user
 
 
+# a logged in user can clear their inbox - removing any exsiting invitations 
+def clear_inbox(user):
+    invites = {}
+    invites_update = {
+        'invites': invites
+    }
+    users.update_one({'username': user['username']}, {'$set': invites_update}) 
+    print('Cleared inbox for \'{0}\''.format(user['username']))
+
+
+# if have any invitations to groups, can join the group
 def join_group(group_name, user):
     user = users.find_one({'username': user['username']})
-    # add group and encrypted key to group_keys and delete invite
+    # add group_name and encrypted_key to group_keys and delete invite from inbox
     invite_key = user['invites'][group_name]
     invites = user['invites']
     try:
@@ -347,14 +360,9 @@ def join_group(group_name, user):
     }
     users.update_one({'username': user['username']}, {'$set': user_update}) 
 
+    # decrypt invite_key into group_key to encrypt join message
     group = groups.find_one({'group_name': group_name})
-    # decrypt invite_key into group_key to encrypt message
-    #Instantiating PKCS1_OAEP object with the private key for decryption
-    private_key = user['private_key']
-    private_key = RSA.importKey(private_key)
-    decrypt = PKCS1_OAEP.new(key = private_key)
-    #Decrypting the message with the PKCS1_OAEP object
-    group_key = decrypt.decrypt(invite_key)
+    group_key = decrypt_group_key(user, group_name)
     f = Fernet(group_key)
     dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     message = '\'{0}\' has joined the group. Welcome!'.format(user['username'])
@@ -372,15 +380,6 @@ def join_group(group_name, user):
     groups.update_one({'group_name': group_name}, {'$set': group_updates})
     print('You have successfully joined {0}'.format(group_name)) 
     return user
-
-
-def clear_inbox(user):
-    invites = {}
-    invites_update = {
-        'invites': invites
-    }
-    users.update_one({'username': user['username']}, {'$set': invites_update}) 
-    print('Cleared inbox for \'{0}\''.format(user['username']))
 
 
 if __name__ == '__main__':
