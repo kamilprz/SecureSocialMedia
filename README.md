@@ -11,8 +11,8 @@ platform and make use of any open source cryptographic libraries.
 
 ----------
 
-Some prerequisites: 
-pip3 install pymongo[srv]
+Some prerequisites: \
+pip3 install pymongo[srv] \
 pip3 install pycryptodome
 
 Also need to set up MongoDB connection with a MongoClient link to your DB
