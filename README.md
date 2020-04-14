@@ -16,3 +16,7 @@ pip3 install pymongo[srv] \
 pip3 install pycryptodome
 
 Also need to set up MongoDB connection with a MongoClient link to your DB
+
+----------
+
+Video of functionality: [https://youtu.be/jOjG3xnEIiI](https://youtu.be/jOjG3xnEIiI)
